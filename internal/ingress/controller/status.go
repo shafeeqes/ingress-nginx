@@ -25,7 +25,6 @@ import (
 	"k8s.io/klog/v2"
 
 	apiv1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/leaderelection"
@@ -93,19 +92,25 @@ func setupLeaderElection(config *leaderElectionConfig) {
 		Host:      hostname,
 	})
 
-	lock := resourcelock.ConfigMapLock{
-		ConfigMapMeta: metav1.ObjectMeta{Namespace: k8s.IngressPodDetails.Namespace, Name: config.ElectionID},
-		Client:        config.Client.CoreV1(),
-		LockConfig: resourcelock.ResourceLockConfig{
+	//TODO: Switch configmapsleases to leases in the next version.
+	lock, err := resourcelock.New(resourcelock.ConfigMapsLeasesResourceLock,
+		k8s.IngressPodDetails.Namespace,
+		config.ElectionID,
+		config.Client.CoreV1(),
+		config.Client.CoordinationV1(),
+		resourcelock.ResourceLockConfig{
 			Identity:      k8s.IngressPodDetails.Name,
 			EventRecorder: recorder,
 		},
+	)
+	if err != nil {
+		klog.Fatalf("unexpected error creating resource lock: %v", err)
 	}
 
 	ttl := 30 * time.Second
 
-	elector, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
-		Lock:          &lock,
+	elector, err = leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
+		Lock:          lock,
 		LeaseDuration: ttl,
 		RenewDeadline: ttl / 2,
 		RetryPeriod:   ttl / 4,
